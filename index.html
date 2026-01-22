@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Weather Map</title>
+
+    <!-- Telegram WebApp -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--tg-theme-bg-color, #1a1a2e);
+            color: var(--tg-theme-text-color, #fff);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #map {
+            width: 100%;
+            height: calc(100vh - 120px);
+            z-index: 1;
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--tg-theme-secondary-bg-color, #16213e);
+            padding: 12px;
+            z-index: 1000;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
+        }
+
+        .layer-buttons {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+            overflow-x: auto;
+            padding-bottom: 5px;
+        }
+
+        .layer-btn {
+            flex-shrink: 0;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 20px;
+            background: var(--tg-theme-button-color, #0f3460);
+            color: var(--tg-theme-button-text-color, #fff);
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .layer-btn.active {
+            background: #4CAF50;
+            transform: scale(1.05);
+        }
+
+        .layer-btn:active {
+            transform: scale(0.95);
+        }
+
+        .info-panel {
+            background: rgba(0,0,0,0.3);
+            border-radius: 12px;
+            padding: 10px 15px;
+            font-size: 13px;
+        }
+
+        .info-panel .city {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .info-panel .details {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .info-panel .detail {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .legend {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: var(--tg-theme-secondary-bg-color, rgba(22, 33, 62, 0.95));
+            padding: 10px;
+            border-radius: 10px;
+            font-size: 11px;
+            z-index: 1000;
+        }
+
+        .legend-title {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin: 3px 0;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 10px;
+            border-radius: 2px;
+        }
+
+        .timestamp {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: var(--tg-theme-secondary-bg-color, rgba(22, 33, 62, 0.95));
+            padding: 8px 12px;
+            border-radius: 10px;
+            font-size: 12px;
+            z-index: 1000;
+        }
+
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--tg-theme-secondary-bg-color, #16213e);
+            padding: 20px 30px;
+            border-radius: 15px;
+            z-index: 2000;
+            display: none;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            width: 30px;
+            height: 30px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: #4CAF50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Leaflet customization */
+        .leaflet-container {
+            background: #1a1a2e;
+        }
+
+        .leaflet-popup-content-wrapper {
+            background: var(--tg-theme-secondary-bg-color, #16213e);
+            color: var(--tg-theme-text-color, #fff);
+            border-radius: 12px;
+        }
+
+        .leaflet-popup-tip {
+            background: var(--tg-theme-secondary-bg-color, #16213e);
+        }
+
+        .weather-popup {
+            min-width: 200px;
+        }
+
+        .weather-popup h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+        }
+
+        .weather-popup .temp {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .weather-popup .desc {
+            opacity: 0.8;
+            margin: 5px 0;
+        }
+
+        .weather-popup .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px;
+            margin-top: 10px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <div class="timestamp" id="timestamp">
+        Загрузка радара...
+    </div>
+
+    <div class="legend" id="legend" style="display: none;">
+        <div class="legend-title">Осадки (мм/ч)</div>
+        <div class="legend-item"><div class="legend-color" style="background: #00ff00"></div> 0.5-1</div>
+        <div class="legend-item"><div class="legend-color" style="background: #ffff00"></div> 1-2</div>
+        <div class="legend-item"><div class="legend-color" style="background: #ffa500"></div> 2-4</div>
+        <div class="legend-item"><div class="legend-color" style="background: #ff0000"></div> 4-8</div>
+        <div class="legend-item"><div class="legend-color" style="background: #ff00ff"></div> 8+</div>
+    </div>
+
+    <div class="controls">
+        <div class="layer-buttons">
+            <button class="layer-btn active" data-layer="radar">🌧️ Осадки</button>
+            <button class="layer-btn" data-layer="clouds">☁️ Облака</button>
+            <button class="layer-btn" data-layer="temp">🌡️ Температура</button>
+            <button class="layer-btn" data-layer="wind">💨 Ветер</button>
+            <button class="layer-btn" data-layer="pressure">🔽 Давление</button>
+        </div>
+
+        <div class="info-panel" id="info-panel">
+            <div class="city" id="city-name">Нажми на карту для погоды</div>
+            <div class="details" id="weather-details">
+                <div class="detail">📍 Выбери точку на карте</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <div>Загрузка...</div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // Telegram WebApp init
+        const tg = window.Telegram?.WebApp;
+        if (tg) {
+            tg.ready();
+            tg.expand();
+        }
+
+        // WeatherAPI key (same as bot)
+        const WEATHER_API_KEY = 'a16e3d7489294faba5b155415262101';
+
+        // Map init - center on Moscow by default
+        let userLat = 55.7558;
+        let userLon = 37.6173;
+
+        // Try to get user location
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    userLat = pos.coords.latitude;
+                    userLon = pos.coords.longitude;
+                    map.setView([userLat, userLon], 10);
+                },
+                () => console.log('Geolocation denied')
+            );
+        }
+
+        const map = L.map('map', {
+            zoomControl: false
+        }).setView([userLat, userLon], 8);
+
+        // Dark tile layer
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OSM & CartoDB',
+            maxZoom: 18
+        }).addTo(map);
+
+        // Add zoom control to bottom left
+        L.control.zoom({ position: 'topleft' }).addTo(map);
+
+        // Layers
+        let currentLayer = null;
+        let radarLayers = [];
+        let radarTimestamps = [];
+        let currentRadarIdx = 0;
+        let animationInterval = null;
+
+        // OpenWeatherMap layers (free tier)
+        const OWM_KEY = '439d4b804bc8187953eb36d2a8c26a02'; // Demo key
+
+        const layers = {
+            radar: null, // RainViewer
+            clouds: `https://tile.openweathermap.org/map/clouds_new/{z}/{x}/{y}.png?appid=${OWM_KEY}`,
+            temp: `https://tile.openweathermap.org/map/temp_new/{z}/{x}/{y}.png?appid=${OWM_KEY}`,
+            wind: `https://tile.openweathermap.org/map/wind_new/{z}/{x}/{y}.png?appid=${OWM_KEY}`,
+            pressure: `https://tile.openweathermap.org/map/pressure_new/{z}/{x}/{y}.png?appid=${OWM_KEY}`
+        };
+
+        // Load RainViewer radar
+        async function loadRainViewer() {
+            try {
+                const response = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+                const data = await response.json();
+
+                radarTimestamps = data.radar.past.concat(data.radar.nowcast || []);
+
+                // Show latest radar
+                if (radarTimestamps.length > 0) {
+                    const latest = radarTimestamps[radarTimestamps.length - 1];
+                    showRadarFrame(latest);
+
+                    // Update timestamp
+                    const date = new Date(latest.time * 1000);
+                    document.getElementById('timestamp').textContent =
+                        `Радар: ${date.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'})}`;
+                }
+
+                document.getElementById('legend').style.display = 'block';
+
+            } catch (e) {
+                console.error('RainViewer error:', e);
+                document.getElementById('timestamp').textContent = 'Ошибка загрузки радара';
+            }
+        }
+
+        function showRadarFrame(frame) {
+            // Remove old radar layers
+            radarLayers.forEach(layer => map.removeLayer(layer));
+            radarLayers = [];
+
+            const radarLayer = L.tileLayer(
+                `https://tilecache.rainviewer.com${frame.path}/256/{z}/{x}/{y}/2/1_1.png`,
+                { opacity: 0.7, zIndex: 100 }
+            );
+
+            radarLayer.addTo(map);
+            radarLayers.push(radarLayer);
+        }
+
+        function showLayer(layerName) {
+            // Remove current layer
+            if (currentLayer) {
+                map.removeLayer(currentLayer);
+                currentLayer = null;
+            }
+
+            // Remove radar layers
+            radarLayers.forEach(layer => map.removeLayer(layer));
+
+            if (layerName === 'radar') {
+                // Show RainViewer radar
+                if (radarTimestamps.length > 0) {
+                    const latest = radarTimestamps[radarTimestamps.length - 1];
+                    showRadarFrame(latest);
+                }
+                document.getElementById('legend').style.display = 'block';
+                document.getElementById('timestamp').style.display = 'block';
+            } else {
+                // Show OWM layer
+                currentLayer = L.tileLayer(layers[layerName], {
+                    opacity: 0.6,
+                    zIndex: 100
+                }).addTo(map);
+                document.getElementById('legend').style.display = 'none';
+                document.getElementById('timestamp').style.display = 'none';
+            }
+        }
+
+        // Layer buttons
+        document.querySelectorAll('.layer-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                showLayer(btn.dataset.layer);
+            });
+        });
+
+        // Click on map to get weather
+        let marker = null;
+
+        map.on('click', async (e) => {
+            const { lat, lng } = e.latlng;
+
+            // Show loading
+            document.getElementById('loading').classList.add('show');
+
+            try {
+                const response = await fetch(
+                    `https://api.weatherapi.com/v1/current.json?key=${WEATHER_API_KEY}&q=${lat},${lng}&aqi=yes&lang=ru`
+                );
+                const data = await response.json();
+
+                // Update marker
+                if (marker) map.removeLayer(marker);
+                marker = L.marker([lat, lng]).addTo(map);
+
+                // Weather popup
+                const weather = data.current;
+                const location = data.location;
+
+                const popupContent = `
+                    <div class="weather-popup">
+                        <h3>${location.name}, ${location.country}</h3>
+                        <div class="temp">${Math.round(weather.temp_c)}°C</div>
+                        <div class="desc">${weather.condition.text}</div>
+                        <div class="stats">
+                            <div>💨 ${(weather.wind_kph / 3.6).toFixed(1)} м/с</div>
+                            <div>💧 ${weather.humidity}%</div>
+                            <div>🔽 ${Math.round(weather.pressure_mb)} гПа</div>
+                            <div>☁️ ${weather.cloud}%</div>
+                        </div>
+                    </div>
+                `;
+
+                marker.bindPopup(popupContent).openPopup();
+
+                // Update bottom panel
+                document.getElementById('city-name').textContent = `${location.name}, ${location.country}`;
+                document.getElementById('weather-details').innerHTML = `
+                    <div class="detail">🌡️ ${Math.round(weather.temp_c)}°C</div>
+                    <div class="detail">💨 ${(weather.wind_kph / 3.6).toFixed(1)} м/с</div>
+                    <div class="detail">💧 ${weather.humidity}%</div>
+                    <div class="detail">☁️ ${weather.cloud}%</div>
+                    <div class="detail">👁 ${weather.vis_km} км</div>
+                `;
+
+            } catch (e) {
+                console.error('Weather error:', e);
+                document.getElementById('city-name').textContent = 'Ошибка загрузки';
+            }
+
+            document.getElementById('loading').classList.remove('show');
+        });
+
+        // Init
+        loadRainViewer();
+
+        // Refresh radar every 5 minutes
+        setInterval(loadRainViewer, 5 * 60 * 1000);
+    </script>
+</body>
+</html>
